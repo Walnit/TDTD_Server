@@ -21,37 +21,99 @@ async def send_error(websocket, message):
     }
     await websocket.send(json.dumps(error_msg))
 
+async def game_process(websocket, room, role):
+    async for message in websocket:
+        print(message)
+
+async def wait_for_start(websocket, room):
+    message = await websocket.recv()
+    event = json.loads(message)
+    assert event["type"] == "ready"
+    assert "token" in event
+
+    if "almostReady" in ROOMS[room]:
+        ROOMS[room]["started"] = True
+    else:
+        ROOMS[room]["almostReady"] = True
+
+    if event["token"] == ROOMS[room]["attacker_id"]:
+        await game_process(websocket, room, "attacker")
+    elif event["token"] == ROOMS[room]["defender_id"]:
+        await game_process(websocket, room, "defender")
+
+async def start_game(room):
+    # Randomize roles
+    psuedorandomchoice = 0
+    for letter in room:
+        psuedorandomchoice += ord(letter)
+    psuedorandomchoice %= 2 # 0 or 1
+
+    # Get roles
+    sockets = list(ROOMS[room]["connected"])
+    attacker = sockets[psuedorandomchoice]
+    defender = sockets[1-psuedorandomchoice]
+
+    attacker_msg = {
+        "type": "start",
+        "role": "attacker"
+    }
+    defender_msg = {
+        "type": "start",
+        "role": "defender"
+    }
+
+    ROOMS[room]["attacker_id"] = attacker.id.hex
+    ROOMS[room]["defender_id"] = defender.id.hex
+
+    await attacker.send(json.dumps(attacker_msg))
+    await defender.send(json.dumps(defender_msg))
+
 async def join_room(websocket, room):
+    print(ROOMS)
     try:
         if room in ROOMS:
-            # Room exists, join room
+            # Room exists, join room and start game
             ROOMS[room]["connected"].add(websocket)
             success_msg = {
                 "type": "success",
-                "message": f"Joined room {room}"
+                "message": f"Joined room {room}",
+                "token": websocket.id.hex
             }
+            await websocket.send(json.dumps(success_msg))
+            await start_game(room)
         else:
             # Room doesnt exist, create room
             ROOMS[room] = {"connected": {websocket}}
             success_msg = {
                 "type": "success",
-                "message": f"Created room {room}"
+                "message": f"Created room {room}",
+                "token": websocket.id.hex
             }
             await websocket.send(json.dumps(success_msg))
+        await wait_for_start(websocket, room)
     finally:
         ROOMS[room]["connected"].remove(websocket)
-        if len(ROOMS[room]) == 0: del ROOMS[room]
+        if len(ROOMS[room]["connected"]) == 0:
+            del ROOMS[room]
+            print("Deleting room", room)
+
 
 async def handler(websocket):
-    message = await websocket.recv()
-    event = json.loads(message)
-    assert event["type"] == "init"
-    assert "room" in event
+    try:
+        message = await websocket.recv()
+        event = json.loads(message)
+        assert event["type"] == "init"
+        assert "room" in event
 
-    if len(event["room"]) == 5 and event["room"].isalnum():
-        await join_room(websocket, event["room"])
-    else:
-        send_error(websocket, "Invalid room code")
+        # DEBUG: REMOVE THIS
+        print(event)
+
+        if len(event["room"]) == 5 and event["room"].isalnum():
+            await join_room(websocket, event["room"])
+        else:
+            await send_error(websocket, "Invalid room code")
+    except websockets.ConnectionClosedOK: pass
+    except websockets.exceptions.ConnectionClosedError: print(websocket.id, "didn't close correctly!")
 
 async def main():
     # Set the stop condition when receiving SIGTERM.
