@@ -23,7 +23,11 @@ async def send_error(websocket, message):
 
 async def game_process(websocket, room, role):
     async for message in websocket:
-        print(message)
+        if "started" in ROOMS[room]:
+            if role == "attacker":
+                await ROOMS[room]["defender"].send(message)
+            else:
+                await ROOMS[room]["attacker"].send(message)
 
 async def wait_for_start(websocket, room):
     message = await websocket.recv()
@@ -31,15 +35,24 @@ async def wait_for_start(websocket, room):
     assert event["type"] == "ready"
     assert "token" in event
 
-    if "almostReady" in ROOMS[room]:
-        ROOMS[room]["started"] = True
+    if event["token"] != ROOMS[room]["attacker_id"] and event["token"] != ROOMS[room]["defender_id"]:
+        send_error(websocket, "Invalid token!")
     else:
-        ROOMS[room]["almostReady"] = True
+        if "almostReady" in ROOMS[room]:
+            ROOMS[room]["started"] = True
+            start_msg = {
+                "type": "start"
+            }
+            websockets.broadcast(ROOMS[room]["connected"], json.dumps(start_msg))
+        else:
+            ROOMS[room]["almostReady"] = True
+        if event["token"] == ROOMS[room]["attacker_id"]:
+            ROOMS[room]["attacker"] = websocket
+            await game_process(websocket, room, "attacker")
+        elif event["token"] == ROOMS[room]["defender_id"]:
+            ROOMS[room]["defender"] = websocket
+            await game_process(websocket, room, "defender")
 
-    if event["token"] == ROOMS[room]["attacker_id"]:
-        await game_process(websocket, room, "attacker")
-    elif event["token"] == ROOMS[room]["defender_id"]:
-        await game_process(websocket, room, "defender")
 
 async def start_game(room):
     # Randomize roles
@@ -54,11 +67,11 @@ async def start_game(room):
     defender = sockets[1-psuedorandomchoice]
 
     attacker_msg = {
-        "type": "start",
+        "type": "role",
         "role": "attacker"
     }
     defender_msg = {
-        "type": "start",
+        "type": "role",
         "role": "defender"
     }
 
@@ -69,7 +82,6 @@ async def start_game(room):
     await defender.send(json.dumps(defender_msg))
 
 async def join_room(websocket, room):
-    print(ROOMS)
     try:
         if room in ROOMS:
             # Room exists, join room and start game
