@@ -1,11 +1,18 @@
 import os
+import ssl
 import json
 import http
 import signal
+import pathlib
 import asyncio
 import websockets
 
 ROOMS = {}
+
+#ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+#pem = pathlib.Path(__file__).with_name("cert.pem")
+#key = pathlib.Path(__file__).with_name("key.pem")
+#ssl_context.load_cert_chain(pem, keyfile=key)
 
 # Game Schema:
 {
@@ -140,7 +147,7 @@ async def main():
 
     port = 8765
     print("Starting server!")
-    async with websockets.serve(handler, "", port, process_request=health_check):
+    async with websockets.serve(handler, "", port, process_request=health_check, ssl=None):
         await stop
 
 
