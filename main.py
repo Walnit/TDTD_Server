@@ -1,5 +1,6 @@
 import os
 import json
+import http
 import signal
 import asyncio
 import websockets
@@ -127,15 +128,19 @@ async def handler(websocket):
     except websockets.ConnectionClosedOK: pass
     except websockets.exceptions.ConnectionClosedError: print(websocket.id, "didn't close correctly!")
 
+async def health_check(path, request_headers):
+    if path == "/health":
+        return http.HTTPStatus.OK, [], b"Ok\b"
+
 async def main():
     # Set the stop condition when receiving SIGTERM.
     loop = asyncio.get_running_loop()
     stop = loop.create_future()
     loop.add_signal_handler(signal.SIGTERM, stop.set_result, None)
 
-    port = int(os.environ.get("PORT", "8765"))
+    port = 8765
     print("Starting server!")
-    async with websockets.serve(handler, "", port):
+    async with websockets.serve(handler, "", port, process_request=health_check):
         await stop
 
 
